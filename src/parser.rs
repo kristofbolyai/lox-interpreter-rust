@@ -101,7 +101,8 @@ pub mod parser {
 
             loop {
                 if let Some(token) = Self::try_parse_single_character_token(&mut char_iter) {
-                    tokens.push(token)
+                    char_iter.next();
+                    tokens.push(token);
                 } else {
                     // Handle unexpected characters
                     if let Some(char) = char_iter.next() {
@@ -122,7 +123,7 @@ pub mod parser {
         }
 
         fn try_parse_single_character_token(char_iter: &mut Peekable<Chars>) -> Option<Token> {
-            if let Some(char) = char_iter.next() {
+            if let Some(char) = char_iter.peek() {
                 // FIXME: Try to avoid memory allocations from to_string
                 return match char {
                     '(' => Some(create_token!(TokenType::LeftParenthesis, char.to_string())),
