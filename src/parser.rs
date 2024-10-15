@@ -24,6 +24,13 @@ pub mod parser {
         RightParenthesis,
         LeftBrace,
         RightBrace,
+        Comma,
+        Dot,
+        Minus,
+        Plus,
+        Semicolon,
+        Slash,
+        Star,
 
         // Special
         EOF,
@@ -36,6 +43,13 @@ pub mod parser {
                 TokenType::RightParenthesis => write!(f, "RIGHT_PAREN"),
                 TokenType::LeftBrace => write!(f, "LEFT_BRACE"),
                 TokenType::RightBrace => write!(f, "RIGHT_BRACE"),
+                TokenType::Comma => write!(f, "COMMA"),
+                TokenType::Dot => write!(f, "DOT"),
+                TokenType::Minus => write!(f, "MINUS"),
+                TokenType::Plus => write!(f, "PLUS"),
+                TokenType::Semicolon => write!(f, "SEMICOLON"),
+                TokenType::Slash => write!(f, "SLASH"),
+                TokenType::Star => write!(f, "STAR"),
                 TokenType::EOF => write!(f, "EOF"),
             }
         }
@@ -81,6 +95,13 @@ pub mod parser {
                     ')' => Some(create_token!(TokenType::RightParenthesis, char.to_string())),
                     '{' => Some(create_token!(TokenType::LeftBrace, char.to_string())),
                     '}' => Some(create_token!(TokenType::RightBrace, char.to_string())),
+                    ',' => Some(create_token!(TokenType::Comma, char.to_string())),
+                    '.' => Some(create_token!(TokenType::Dot, char.to_string())),
+                    '-' => Some(create_token!(TokenType::Minus, char.to_string())),
+                    '+' => Some(create_token!(TokenType::Plus, char.to_string())),
+                    ';' => Some(create_token!(TokenType::Semicolon, char.to_string())),
+                    '/' => Some(create_token!(TokenType::Slash, char.to_string())),
+                    '*' => Some(create_token!(TokenType::Star, char.to_string())),
                     _ => None,
                 };
             }
