@@ -4,7 +4,10 @@ pub mod parser {
 
     macro_rules! create_token {
         ($token_type:expr, $lexem:expr) => {
-            Token { token_type: $token_type, lexem: $lexem }
+            Token {
+                token_type: $token_type,
+                lexem: $lexem,
+            }
         };
     }
 
@@ -19,6 +22,8 @@ pub mod parser {
         // Single-character
         LeftParenthesis,
         RightParenthesis,
+        LeftBrace,
+        RightBrace,
 
         // Special
         EOF,
@@ -29,7 +34,9 @@ pub mod parser {
             match &self {
                 TokenType::LeftParenthesis => write!(f, "LEFT_PAREN"),
                 TokenType::RightParenthesis => write!(f, "RIGHT_PAREN"),
-                TokenType::EOF => write!(f, "EOF")
+                TokenType::LeftBrace => write!(f, "LEFT_BRACE"),
+                TokenType::RightBrace => write!(f, "RIGHT_BRACE"),
+                TokenType::EOF => write!(f, "EOF"),
             }
         }
     }
@@ -40,7 +47,9 @@ pub mod parser {
 
     impl<'a> Parser<'a> {
         pub fn new(s: &str) -> Parser {
-            Parser { source_code: s.chars() }
+            Parser {
+                source_code: s.chars(),
+            }
         }
 
         pub fn tokenize(&mut self) -> Vec<Token> {
@@ -70,7 +79,9 @@ pub mod parser {
                 return match char {
                     '(' => Some(create_token!(TokenType::LeftParenthesis, char.to_string())),
                     ')' => Some(create_token!(TokenType::RightParenthesis, char.to_string())),
-                    _ => None
+                    '{' => Some(create_token!(TokenType::LeftBrace, char.to_string())),
+                    '}' => Some(create_token!(TokenType::RightBrace, char.to_string())),
+                    _ => None,
                 };
             }
 
