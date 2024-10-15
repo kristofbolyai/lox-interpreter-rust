@@ -1,9 +1,10 @@
 mod parser;
 
+use crate::parser::parser::Parser;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use crate::parser::parser::Parser;
+use std::process::exit;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -26,10 +27,19 @@ fn main() {
             });
 
             let mut parser = Parser::new(file_contents.as_str());
-            let tokens = parser.tokenize();
+            let parse_result = parser.tokenize();
 
-            for token in tokens {
+            for error in &parse_result.errors {
+                eprintln!("{}", error)
+            }
+
+            for token in &parse_result.tokens {
                 println!("{} {} null", token.token_type, token.lexem)
+            }
+
+            // Exit with error ode 65 if any errors are present
+            if !&parse_result.errors.is_empty() {
+                exit(65);
             }
         }
         _ => {
