@@ -1,6 +1,9 @@
+mod parser;
+
 use std::env;
 use std::fs;
 use std::io::{self, Write};
+use crate::parser::parser::Parser;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -22,10 +25,11 @@ fn main() {
                 String::new()
             });
 
-            if !file_contents.is_empty() {
-                panic!("Scanner not implemented");
-            } else {
-                println!("EOF  null");
+            let mut parser = Parser::new(file_contents.as_str());
+            let tokens = parser.tokenize();
+
+            for token in tokens {
+                println!("{} {} null", token.token_type, token.lexem)
             }
         }
         _ => {
