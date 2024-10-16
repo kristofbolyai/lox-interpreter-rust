@@ -1,4 +1,4 @@
-pub mod parser {
+pub mod tokenizer {
     use std::fmt::{Display, Formatter};
     use std::iter::Peekable;
     use std::str::Chars;
@@ -23,7 +23,7 @@ pub mod parser {
         Eof
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Eq, PartialEq)]
     pub enum TokenType {
         // Single-character
         LeftParenthesis,
@@ -115,20 +115,20 @@ pub mod parser {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Eq, PartialEq)]
     pub struct Token {
         pub token_type: TokenType,
         pub lexem: String,
     }
 
-    pub enum ParseError {
+    pub enum TokenizerParseError {
         UnexpectedCharacter { line: u64, character: String },
     }
 
-    impl Display for ParseError {
+    impl Display for TokenizerParseError {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
             match &self {
-                ParseError::UnexpectedCharacter { line, character } => {
+                TokenizerParseError::UnexpectedCharacter { line, character } => {
                     write!(
                         f,
                         "[line {}] Error: Unexpected character: {}",
@@ -139,25 +139,25 @@ pub mod parser {
         }
     }
 
-    pub struct ParseResult {
+    pub struct TokenizerParseResult {
         pub tokens: Vec<Token>,
-        pub errors: Vec<ParseError>,
+        pub errors: Vec<TokenizerParseError>,
     }
 
-    pub struct Parser<'a> {
+    pub struct Tokenizer<'a> {
         source_code: Peekable<Chars<'a>>,
     }
 
-    impl<'a> Parser<'a> {
-        pub fn new(s: &str) -> Parser {
-            Parser {
+    impl<'a> Tokenizer<'a> {
+        pub fn new(s: &str) -> Tokenizer {
+            Tokenizer {
                 source_code: s.chars().peekable(),
             }
         }
 
-        pub fn tokenize(&mut self) -> ParseResult {
+        pub fn tokenize(&mut self) -> TokenizerParseResult {
             let mut tokens: Vec<Token> = Vec::new();
-            let mut errors: Vec<ParseError> = Vec::new();
+            let mut errors: Vec<TokenizerParseError> = Vec::new();
 
             let mut char_iter = &mut self.source_code;
 
@@ -176,7 +176,7 @@ pub mod parser {
                             continue;
                         }
 
-                        errors.push(ParseError::UnexpectedCharacter {
+                        errors.push(TokenizerParseError::UnexpectedCharacter {
                             character: char.to_string(),
                             line,
                         })
@@ -189,7 +189,7 @@ pub mod parser {
 
             tokens.push(create_token!(TokenType::EOF));
 
-            ParseResult { tokens, errors }
+            TokenizerParseResult { tokens, errors }
         }
 
         // FIXME: Try to avoid memory allocations from to_string
@@ -223,6 +223,45 @@ pub mod parser {
             }
 
             None
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(unused_imports)]
+    mod tests {
+        use super::*;
+        use crate::tokenizer::tokenizer::TokenType::EOF;
+        use pretty_assertions::{assert_eq, assert_ne};
+
+        fn assert_tokenizes_without_error(s: &str) -> Vec<Token> {
+            let mut tokenizer = Tokenizer::new(s);
+            let result = tokenizer.tokenize();
+
+            assert_eq!(result.errors.is_empty(), true);
+
+            result.tokens
+        }
+
+        #[test]
+        fn empty_source_returns_eof() {
+            let tokens = assert_tokenizes_without_error("");
+            let mut token_iter = tokens.iter();
+            assert_eq!(token_iter.next(), Some(create_token!(TokenType::EOF)));
+            assert_eq!(token_iter.next(), None);
+        }
+
+        #[test]
+        fn parenthesis_parses() {
+            let tokens = assert_tokenizes_without_error("");
+            let mut token_iter = tokens.iter();
+            assert_eq!(
+                token_iter.next(),
+                Some(&Token {
+                    token_type: EOF,
+                    lexem: String::new()
+                })
+            );
+            assert_eq!(token_iter.next(), None);
         }
     }
 }

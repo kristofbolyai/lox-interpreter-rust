@@ -1,6 +1,6 @@
-mod parser;
+pub mod tokenizer;
 
-use crate::parser::parser::Parser;
+use crate::tokenizer::tokenizer::Tokenizer;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -26,19 +26,19 @@ fn main() {
                 String::new()
             });
 
-            let mut parser = Parser::new(file_contents.as_str());
-            let parse_result = parser.tokenize();
+            let mut tokenizer = Tokenizer::new(file_contents.as_str());
+            let tokenizer_result = tokenizer.tokenize();
 
-            for error in &parse_result.errors {
+            for error in &tokenizer_result.errors {
                 eprintln!("{}", error)
             }
 
-            for token in &parse_result.tokens {
+            for token in &tokenizer_result.tokens {
                 println!("{} {} null", token.token_type, token.lexem)
             }
 
             // Exit with error ode 65 if any errors are present
-            if !&parse_result.errors.is_empty() {
+            if !&tokenizer_result.errors.is_empty() {
                 exit(65);
             }
         }
