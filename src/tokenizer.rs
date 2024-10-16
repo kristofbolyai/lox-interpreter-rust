@@ -3,6 +3,8 @@ pub mod tokenizer {
     use std::fmt::{Display, Formatter};
     use std::iter::Peekable;
     use std::str::Chars;
+    use strum::IntoEnumIterator;
+    use strum_macros::EnumIter;
 
     macro_rules! create_token {
         ($token_type:expr) => {
@@ -13,7 +15,7 @@ pub mod tokenizer {
         };
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Eq, PartialEq)]
     enum TokenLength {
         Single,
         SingleOrDouble,
@@ -22,7 +24,7 @@ pub mod tokenizer {
         EOF,
     }
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq, EnumIter, Copy, Clone)]
     pub enum TokenType {
         // Single-character
         LeftParenthesis,
@@ -193,36 +195,107 @@ pub mod tokenizer {
             TokenizerParseResult { tokens, errors }
         }
 
-        // FIXME: Try to avoid memory allocations from to_string
         fn try_parse_single_or_double_character_token(
             char_iter: &mut Peekable<Chars>,
         ) -> Option<Token> {
-            None
-        }
+            let maybe_first_char = char_iter.peek();
 
-        // FIXME: Try to avoid memory allocations from to_string
-        fn try_parse_single_character_token(char_iter: &mut Peekable<Chars>) -> Option<Token> {
-            if let Some(char) = char_iter.peek() {
-                let token = match char {
-                    '(' => Some(create_token!(TokenType::LeftParenthesis)),
-                    ')' => Some(create_token!(TokenType::RightParenthesis)),
-                    '{' => Some(create_token!(TokenType::LeftBrace)),
-                    '}' => Some(create_token!(TokenType::RightBrace)),
-                    ',' => Some(create_token!(TokenType::Comma)),
-                    '.' => Some(create_token!(TokenType::Dot)),
-                    '-' => Some(create_token!(TokenType::Minus)),
-                    '+' => Some(create_token!(TokenType::Plus)),
-                    ';' => Some(create_token!(TokenType::Semicolon)),
-                    '/' => Some(create_token!(TokenType::Slash)),
-                    '*' => Some(create_token!(TokenType::Star)),
-                    _ => None,
-                };
+            if maybe_first_char == None {
+                return None;
+            }
 
-                if let Some(_) = token {
-                    char_iter.next();
+            let token_types_matching_first_char: Vec<TokenType> = TokenType::iter()
+                .filter(|token_type| token_type.token_length() == TokenLength::SingleOrDouble)
+                .filter(|token_type| {
+                    let mut token_type_chars = token_type.token_lexem().chars();
+                    if let Some(first_token_char) = token_type_chars.next() {
+                        return first_token_char.eq(maybe_first_char.unwrap());
+                    }
+
+                    false
+                })
+                .collect();
+
+            // We have no matches for the first char, we can't find any matching tokens
+            if token_types_matching_first_char.is_empty() {
+                return None;
+            }
+
+            // Iterate the character and check whether the next character matches
+            let first_char = char_iter.next().unwrap();
+
+            let token_types_matching_full_lexem: Vec<&TokenType> =
+                token_types_matching_first_char
+                    .iter()
+                    .filter(|token_type| {
+                        let mut token_type_chars = token_type.token_lexem().chars();
+                        // We've already checked the first char
+                        token_type_chars.next();
+
+                        if let Some(second_token_char) = token_type_chars.next() {
+                            if let Some(second_char) = char_iter.peek() {
+                                return second_token_char.eq(second_char);
+                            }
+
+                            // Token type has two characters, but char_iter only has
+                            // a single value left
+                            return false;
+                        }
+
+                        // The token type is a single-character type, so it's valid
+                        true
+                    })
+                    .collect();
+
+            if token_types_matching_full_lexem.is_empty() {
+                return None;
+            }
+
+            let token_type : &TokenType;
+
+            if token_types_matching_full_lexem.len() > 1 {
+                let maybe_token_type = token_types_matching_full_lexem.iter().filter(|token_type| token_type.token_lexem().len() == 2).next();
+
+                if maybe_token_type == None {
+                    panic!(
+                        "Token '{}{}' matched multiple single tokens while parsing single-or-double tokens.",
+                        first_char,
+                        char_iter.peek().unwrap_or(&'\0')
+                    );
                 }
 
-                return token;
+                token_type = maybe_token_type.unwrap();
+            } else {
+                token_type = token_types_matching_full_lexem[0];
+            }
+
+            // Check if we used two chars for the lexem, if so, move the char iterator
+            if token_type.token_lexem().len() == 2 {
+                char_iter.next();
+            }
+
+            Some(create_token!(*token_type))
+        }
+
+        fn try_parse_single_character_token(char_iter: &mut Peekable<Chars>) -> Option<Token> {
+            if let Some(char) = char_iter.peek() {
+                let maybe_token_type = TokenType::iter()
+                    .filter(|token_type| token_type.token_length() == TokenLength::Single)
+                    .filter(|token_type| {
+                        if let Some(single_char_token) = token_type.token_lexem().chars().next() {
+                            return single_char_token.eq(char);
+                        }
+
+                        false
+                    })
+                    .next();
+
+                if let Some(token_type) = maybe_token_type {
+                    // Iterate the character as we have found a token
+                    char_iter.next();
+
+                    return Some(create_token!(token_type.clone()));
+                }
             }
 
             None
@@ -314,11 +387,29 @@ pub mod tokenizer {
         }
 
         #[test]
-        fn equality_parses() {
+        fn assignment_and_equality_parses() {
             let tokens = assert_tokenizes_without_error("={===}");
             assert_token_list_matches(
                 tokens,
-                vec![Equal, LeftBrace, EqualEqual, Equal, RightBrace],
+                vec![Equal, LeftBrace, EqualEqual, Equal, RightBrace, EOF],
+            );
+        }
+
+        #[test]
+        fn negation_and_inequality_parses() {
+            let tokens = assert_tokenizes_without_error("!!===");
+            assert_token_list_matches(
+                tokens,
+                vec![Bang, BangEqual, EqualEqual, EOF],
+            );
+        }
+
+        #[test]
+        fn relational_operations_parses() {
+            let tokens = assert_tokenizes_without_error("<<=>>=");
+            assert_token_list_matches(
+                tokens,
+                vec![Less, LessEqual, Greater, GreaterEqual, EOF],
             );
         }
     }
