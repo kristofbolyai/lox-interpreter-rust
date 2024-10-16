@@ -1,9 +1,8 @@
 pub mod tokenizer {
+    use convert_case::{Case, Casing};
     use std::fmt::{Display, Formatter};
     use std::iter::Peekable;
     use std::str::Chars;
-    use convert_case::{Case, Casing};
-    use crate::parser::parser::TokenLength::{Eof, Single, SingleOrDouble};
 
     macro_rules! create_token {
         ($token_type:expr) => {
@@ -20,7 +19,7 @@ pub mod tokenizer {
         SingleOrDouble,
         Literal,
         Keyword,
-        Eof
+        EOF,
     }
 
     #[derive(Debug, Eq, PartialEq)]
@@ -55,26 +54,26 @@ pub mod tokenizer {
     impl TokenType {
         fn token_length(&self) -> TokenLength {
             match &self {
-                TokenType::LeftParenthesis => Single,
-                TokenType::RightParenthesis => Single,
-                TokenType::LeftBrace => Single,
-                TokenType::RightBrace => Single,
-                TokenType::Comma => Single,
-                TokenType::Dot => Single,
-                TokenType::Minus => Single,
-                TokenType::Plus => Single,
-                TokenType::Semicolon => Single,
-                TokenType::Slash => Single,
-                TokenType::Star => Single,
-                TokenType::Bang => SingleOrDouble,
-                TokenType::BangEqual => SingleOrDouble,
-                TokenType::Equal => SingleOrDouble,
-                TokenType::EqualEqual => SingleOrDouble,
-                TokenType::Greater => SingleOrDouble,
-                TokenType::GreaterEqual => SingleOrDouble,
-                TokenType::Less => SingleOrDouble,
-                TokenType::LessEqual => SingleOrDouble,
-                TokenType::EOF => Eof
+                TokenType::LeftParenthesis => TokenLength::Single,
+                TokenType::RightParenthesis => TokenLength::Single,
+                TokenType::LeftBrace => TokenLength::Single,
+                TokenType::RightBrace => TokenLength::Single,
+                TokenType::Comma => TokenLength::Single,
+                TokenType::Dot => TokenLength::Single,
+                TokenType::Minus => TokenLength::Single,
+                TokenType::Plus => TokenLength::Single,
+                TokenType::Semicolon => TokenLength::Single,
+                TokenType::Slash => TokenLength::Single,
+                TokenType::Star => TokenLength::Single,
+                TokenType::Bang => TokenLength::SingleOrDouble,
+                TokenType::BangEqual => TokenLength::SingleOrDouble,
+                TokenType::Equal => TokenLength::SingleOrDouble,
+                TokenType::EqualEqual => TokenLength::SingleOrDouble,
+                TokenType::Greater => TokenLength::SingleOrDouble,
+                TokenType::GreaterEqual => TokenLength::SingleOrDouble,
+                TokenType::Less => TokenLength::SingleOrDouble,
+                TokenType::LessEqual => TokenLength::SingleOrDouble,
+                TokenType::EOF => TokenLength::EOF,
             }
         }
 
@@ -99,7 +98,7 @@ pub mod tokenizer {
                 TokenType::GreaterEqual => ">=",
                 TokenType::Less => "<",
                 TokenType::LessEqual => "<=",
-                TokenType::EOF => ""
+                TokenType::EOF => "",
             }
         }
     }
@@ -164,7 +163,9 @@ pub mod tokenizer {
             let mut line: u64 = 1;
 
             loop {
-                if let Some(token) = Self::try_parse_single_or_double_character_token(&mut char_iter) {
+                if let Some(token) =
+                    Self::try_parse_single_or_double_character_token(&mut char_iter)
+                {
                     tokens.push(token);
                 } else if let Some(token) = Self::try_parse_single_character_token(&mut char_iter) {
                     tokens.push(token);
@@ -193,7 +194,9 @@ pub mod tokenizer {
         }
 
         // FIXME: Try to avoid memory allocations from to_string
-        fn try_parse_single_or_double_character_token(char_iter: &mut Peekable<Chars>) -> Option<Token> {
+        fn try_parse_single_or_double_character_token(
+            char_iter: &mut Peekable<Chars>,
+        ) -> Option<Token> {
             None
         }
 
@@ -230,7 +233,7 @@ pub mod tokenizer {
     #[allow(unused_imports)]
     mod tests {
         use super::*;
-        use crate::tokenizer::tokenizer::TokenType::EOF;
+        use crate::tokenizer::tokenizer::TokenType::*;
         use pretty_assertions::{assert_eq, assert_ne};
 
         fn assert_tokenizes_without_error(s: &str) -> Vec<Token> {
@@ -242,26 +245,81 @@ pub mod tokenizer {
             result.tokens
         }
 
+        fn assert_tokenizes_with_error(s: &str) {
+            let mut tokenizer = Tokenizer::new(s);
+            let result = tokenizer.tokenize();
+
+            assert_eq!(result.errors.is_empty(), false);
+        }
+
+        fn assert_token_list_matches(result_tokens: Vec<Token>, expected: Vec<TokenType>) {
+            let expected_tokens: Vec<Token> = expected
+                .into_iter()
+                .map(|token_type| Token {
+                    lexem: token_type.token_lexem().to_string(),
+                    token_type,
+                })
+                .collect();
+
+            assert_eq!(result_tokens, expected_tokens);
+        }
+
         #[test]
         fn empty_source_returns_eof() {
             let tokens = assert_tokenizes_without_error("");
-            let mut token_iter = tokens.iter();
-            assert_eq!(token_iter.next(), Some(create_token!(TokenType::EOF)));
-            assert_eq!(token_iter.next(), None);
+            assert_token_list_matches(tokens, vec![EOF]);
         }
 
         #[test]
         fn parenthesis_parses() {
-            let tokens = assert_tokenizes_without_error("");
-            let mut token_iter = tokens.iter();
-            assert_eq!(
-                token_iter.next(),
-                Some(&Token {
-                    token_type: EOF,
-                    lexem: String::new()
-                })
+            let tokens = assert_tokenizes_without_error("(()");
+            assert_token_list_matches(
+                tokens,
+                vec![LeftParenthesis, LeftParenthesis, RightParenthesis, EOF],
             );
-            assert_eq!(token_iter.next(), None);
+        }
+
+        #[test]
+        fn braces_parses() {
+            let tokens = assert_tokenizes_without_error("{{}}");
+            assert_token_list_matches(
+                tokens,
+                vec![LeftBrace, LeftBrace, RightBrace, RightBrace, EOF],
+            );
+        }
+
+        #[test]
+        fn single_tokens_parses() {
+            let tokens = assert_tokenizes_without_error("({*.,+*})");
+            assert_token_list_matches(
+                tokens,
+                vec![
+                    LeftParenthesis,
+                    LeftBrace,
+                    Star,
+                    Dot,
+                    Comma,
+                    Plus,
+                    Star,
+                    RightBrace,
+                    RightParenthesis,
+                    EOF,
+                ],
+            )
+        }
+
+        #[test]
+        fn unexpected_tokens_error() {
+            assert_tokenizes_with_error("@,.$(#");
+        }
+
+        #[test]
+        fn equality_parses() {
+            let tokens = assert_tokenizes_without_error("={===}");
+            assert_token_list_matches(
+                tokens,
+                vec![Equal, LeftBrace, EqualEqual, Equal, RightBrace],
+            );
         }
     }
 }
