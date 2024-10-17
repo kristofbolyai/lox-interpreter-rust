@@ -361,11 +361,13 @@ pub mod tokenizer {
             result.tokens
         }
 
-        fn assert_tokenizes_with_error(s: &str) {
+        fn assert_tokenizes_with_error(s: &str) -> Vec<Token> {
             let mut tokenizer = Tokenizer::new(s);
             let result = tokenizer.tokenize();
 
             assert_eq!(result.errors.is_empty(), false);
+
+            result.tokens
         }
 
         fn assert_token_list_matches(result_tokens: Vec<Token>, expected: Vec<TokenType>) {
@@ -475,6 +477,12 @@ pub mod tokenizer {
         fn whitespace_gets_ignored_parses() {
             let tokens = assert_tokenizes_without_error("(    \t ) \r *");
             assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, Star, EOF]);
+        }
+
+        #[test]
+        fn multi_line_errors_work() {
+            let tokens = assert_tokenizes_with_error("# ( \n)\t@");
+            assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
         }
     }
 }
