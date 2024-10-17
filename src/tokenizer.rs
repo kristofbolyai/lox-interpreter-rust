@@ -176,15 +176,16 @@ pub mod tokenizer {
                 } else {
                     // Handle unexpected characters
                     if let Some(char) = char_iter.next() {
-                        if char == '\n' {
-                            line += 1;
-                            continue;
+                        match char {
+                            '\n' => line += 1,
+                            '\t' => (),
+                            '\r' => (),
+                            ' ' => (),
+                            _ => errors.push(TokenizerParseError::UnexpectedCharacter {
+                                character: char.to_string(),
+                                line,
+                            }),
                         }
-
-                        errors.push(TokenizerParseError::UnexpectedCharacter {
-                            character: char.to_string(),
-                            line,
-                        })
                     } else {
                         // Exit the loop if no chars are left
                         break;
@@ -468,6 +469,12 @@ pub mod tokenizer {
                     EOF,
                 ],
             );
+        }
+
+        #[test]
+        fn whitespace_gets_ignored_parses() {
+            let tokens = assert_tokenizes_without_error("(    \t ) \r *");
+            assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, Star, EOF]);
         }
     }
 }
