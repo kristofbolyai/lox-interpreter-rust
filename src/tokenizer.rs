@@ -165,6 +165,8 @@ pub mod tokenizer {
             let mut line: u64 = 1;
 
             loop {
+                Self::try_skip_comments(&mut char_iter);
+
                 if let Some(token) =
                     Self::try_parse_single_or_double_character_token(&mut char_iter)
                 {
@@ -193,6 +195,44 @@ pub mod tokenizer {
             tokens.push(create_token!(TokenType::EOF));
 
             TokenizerParseResult { tokens, errors }
+        }
+
+        fn try_skip_comments(char_iter: &mut Peekable<Chars>) {
+            let mut cloned_char_iter = char_iter.clone();
+            let maybe_first_char = cloned_char_iter.peek();
+
+            if maybe_first_char == None {
+                return;
+            }
+
+            let first_char = maybe_first_char.unwrap();
+
+            if !first_char.eq(&'/') {
+                return;
+            }
+
+            // Skip the first char
+            cloned_char_iter.next();
+
+            let maybe_second_char = cloned_char_iter.peek();
+
+            if maybe_second_char == None {
+                return;
+            }
+
+            let second_char = maybe_second_char.unwrap();
+
+            if !second_char.eq(&'/') {
+                return;
+            }
+
+            // We have a comment, go until the next line
+            while let Some(char) = char_iter.next() {
+                // Break if we've found a new line
+                if char.eq(&'\n') {
+                    break;
+                }
+            }
         }
 
         fn try_parse_single_or_double_character_token(
@@ -224,37 +264,39 @@ pub mod tokenizer {
             // Iterate the character and check whether the next character matches
             let first_char = char_iter.next().unwrap();
 
-            let token_types_matching_full_lexem: Vec<&TokenType> =
-                token_types_matching_first_char
-                    .iter()
-                    .filter(|token_type| {
-                        let mut token_type_chars = token_type.token_lexem().chars();
-                        // We've already checked the first char
-                        token_type_chars.next();
+            let token_types_matching_full_lexem: Vec<&TokenType> = token_types_matching_first_char
+                .iter()
+                .filter(|token_type| {
+                    let mut token_type_chars = token_type.token_lexem().chars();
+                    // We've already checked the first char
+                    token_type_chars.next();
 
-                        if let Some(second_token_char) = token_type_chars.next() {
-                            if let Some(second_char) = char_iter.peek() {
-                                return second_token_char.eq(second_char);
-                            }
-
-                            // Token type has two characters, but char_iter only has
-                            // a single value left
-                            return false;
+                    if let Some(second_token_char) = token_type_chars.next() {
+                        if let Some(second_char) = char_iter.peek() {
+                            return second_token_char.eq(second_char);
                         }
 
-                        // The token type is a single-character type, so it's valid
-                        true
-                    })
-                    .collect();
+                        // Token type has two characters, but char_iter only has
+                        // a single value left
+                        return false;
+                    }
+
+                    // The token type is a single-character type, so it's valid
+                    true
+                })
+                .collect();
 
             if token_types_matching_full_lexem.is_empty() {
                 return None;
             }
 
-            let token_type : &TokenType;
+            let token_type: &TokenType;
 
             if token_types_matching_full_lexem.len() > 1 {
-                let maybe_token_type = token_types_matching_full_lexem.iter().filter(|token_type| token_type.token_lexem().len() == 2).next();
+                let maybe_token_type = token_types_matching_full_lexem
+                    .iter()
+                    .filter(|token_type| token_type.token_lexem().len() == 2)
+                    .next();
 
                 if maybe_token_type == None {
                     panic!(
@@ -398,18 +440,33 @@ pub mod tokenizer {
         #[test]
         fn negation_and_inequality_parses() {
             let tokens = assert_tokenizes_without_error("!!===");
-            assert_token_list_matches(
-                tokens,
-                vec![Bang, BangEqual, EqualEqual, EOF],
-            );
+            assert_token_list_matches(tokens, vec![Bang, BangEqual, EqualEqual, EOF]);
         }
 
         #[test]
         fn relational_operations_parses() {
             let tokens = assert_tokenizes_without_error("<<=>>=");
+            assert_token_list_matches(tokens, vec![Less, LessEqual, Greater, GreaterEqual, EOF]);
+        }
+
+        #[test]
+        fn comments_get_ignored_parses() {
+            let tokens = assert_tokenizes_without_error("()// Comment");
+            assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
+        }
+
+        #[test]
+        fn comments_get_ignored_only_until_newline_parses() {
+            let tokens = assert_tokenizes_without_error("()// Comment\n*(");
             assert_token_list_matches(
                 tokens,
-                vec![Less, LessEqual, Greater, GreaterEqual, EOF],
+                vec![
+                    LeftParenthesis,
+                    RightParenthesis,
+                    Star,
+                    LeftParenthesis,
+                    EOF,
+                ],
             );
         }
     }
