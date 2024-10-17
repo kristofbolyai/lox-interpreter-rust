@@ -228,11 +228,13 @@ pub mod tokenizer {
             }
 
             // We have a comment, go until the next line
-            while let Some(char) = char_iter.next() {
+            while let Some(char) = char_iter.peek() {
                 // Break if we've found a new line
                 if char.eq(&'\n') {
                     break;
                 }
+
+                char_iter.next();
             }
         }
 
