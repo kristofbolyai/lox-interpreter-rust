@@ -11,6 +11,17 @@ pub mod tokenizer {
             Token {
                 token_type: $token_type,
                 lexem: $token_type.token_lexem().to_string(),
+                literal: None,
+            }
+        };
+    }
+
+    macro_rules! create_literal_token {
+        ($token_type:expr, $literal:expr) => {
+            Token {
+                token_type: $token_type,
+                lexem: $token_type.token_lexem().to_string().replace("&", &*$literal),
+                literal: Some($literal),
             }
         };
     }
@@ -49,6 +60,9 @@ pub mod tokenizer {
         Less,
         LessEqual,
 
+        // Literals
+        StringLiteral,
+
         // Special
         EOF,
     }
@@ -75,6 +89,7 @@ pub mod tokenizer {
                 TokenType::GreaterEqual => TokenLength::SingleOrDouble,
                 TokenType::Less => TokenLength::SingleOrDouble,
                 TokenType::LessEqual => TokenLength::SingleOrDouble,
+                TokenType::StringLiteral => TokenLength::Literal,
                 TokenType::EOF => TokenLength::EOF,
             }
         }
@@ -100,6 +115,8 @@ pub mod tokenizer {
                 TokenType::GreaterEqual => ">=",
                 TokenType::Less => "<",
                 TokenType::LessEqual => "<=",
+                // & is later replaced with the literal's value
+                TokenType::StringLiteral => "\"&\"",
                 TokenType::EOF => "",
             }
         }
@@ -120,10 +137,13 @@ pub mod tokenizer {
     pub struct Token {
         pub token_type: TokenType,
         pub lexem: String,
+        pub literal: Option<String>,
     }
 
+    #[derive(Eq, PartialEq)]
     pub enum TokenizerParseError {
         UnexpectedCharacter { line: u64, character: String },
+        UnterminatedStringLiteral { line: u64 },
     }
 
     impl Display for TokenizerParseError {
@@ -135,6 +155,9 @@ pub mod tokenizer {
                         "[line {}] Error: Unexpected character: {}",
                         line, character
                     )
+                }
+                TokenizerParseError::UnterminatedStringLiteral { line } => {
+                    write!(f, "[line {}] Error: Unterminated string.", line)
                 }
             }
         }
@@ -167,8 +190,15 @@ pub mod tokenizer {
             loop {
                 Self::try_skip_comments(&mut char_iter);
 
-                if let Some(token) =
-                    Self::try_parse_single_or_double_character_token(&mut char_iter)
+                let string_parse_result = Self::try_parse_string_literals(&mut char_iter, line);
+
+                if let Ok(Some(token)) = string_parse_result {
+                    tokens.push(token);
+                } else if let Err(error) = string_parse_result {
+                    errors.push(error);
+                }
+
+                if let Some(token) = Self::try_parse_single_or_double_character_token(&mut char_iter)
                 {
                     tokens.push(token);
                 } else if let Some(token) = Self::try_parse_single_character_token(&mut char_iter) {
@@ -235,6 +265,44 @@ pub mod tokenizer {
                 }
 
                 char_iter.next();
+            }
+        }
+
+        fn try_parse_string_literals(char_iter: &mut Peekable<Chars>, line: u64) -> Result<Option<Token>, TokenizerParseError> {
+            let maybe_first_char = char_iter.peek();
+
+            if maybe_first_char == None {
+                return Ok(None);
+            }
+
+            let first_char = maybe_first_char.unwrap();
+
+            if first_char != &'"' {
+                return Ok(None);
+            }
+
+            // Iterate to the next character
+            char_iter.next();
+
+            let mut literal_terminated = false;
+            let mut literal = String::new();
+
+            while let Some(next_char) = char_iter.next() {
+                match next_char {
+                    '\n' => return Err(TokenizerParseError::UnterminatedStringLiteral {line}),
+                    '"' => literal_terminated = true,
+                    _ => literal.push(next_char)
+                }
+
+                if literal_terminated {
+                    break;
+                }
+            }
+
+            if !literal_terminated {
+                Err(TokenizerParseError::UnterminatedStringLiteral {line})
+            } else {
+                Ok(Some(create_literal_token!(TokenType::StringLiteral, literal)))
             }
         }
 
@@ -353,6 +421,7 @@ pub mod tokenizer {
         use super::*;
         use crate::tokenizer::tokenizer::TokenType::*;
         use pretty_assertions::{assert_eq, assert_ne};
+        use std::ptr::null;
 
         fn assert_tokenizes_without_error(s: &str) -> Vec<Token> {
             let mut tokenizer = Tokenizer::new(s);
@@ -363,37 +432,42 @@ pub mod tokenizer {
             result.tokens
         }
 
-        fn assert_tokenizes_with_error(s: &str) -> Vec<Token> {
+        fn assert_tokenizes_with_error(s: &str) -> (Vec<Token>, Vec<TokenizerParseError>) {
             let mut tokenizer = Tokenizer::new(s);
             let result = tokenizer.tokenize();
 
             assert_eq!(result.errors.is_empty(), false);
 
-            result.tokens
+            (result.tokens, result.errors)
         }
 
-        fn assert_token_list_matches(result_tokens: Vec<Token>, expected: Vec<TokenType>) {
+        fn assert_token_types_matches(result_tokens: Vec<Token>, expected: Vec<TokenType>) {
             let expected_tokens: Vec<Token> = expected
                 .into_iter()
                 .map(|token_type| Token {
                     lexem: token_type.token_lexem().to_string(),
                     token_type,
+                    literal: None,
                 })
                 .collect();
 
             assert_eq!(result_tokens, expected_tokens);
         }
 
+        fn assert_token_list_matches(result_tokens: Vec<Token>, expected: Vec<Token>) {
+            assert_eq!(result_tokens, expected);
+        }
+
         #[test]
         fn empty_source_returns_eof() {
             let tokens = assert_tokenizes_without_error("");
-            assert_token_list_matches(tokens, vec![EOF]);
+            assert_token_types_matches(tokens, vec![EOF]);
         }
 
         #[test]
         fn parenthesis_parses() {
             let tokens = assert_tokenizes_without_error("(()");
-            assert_token_list_matches(
+            assert_token_types_matches(
                 tokens,
                 vec![LeftParenthesis, LeftParenthesis, RightParenthesis, EOF],
             );
@@ -402,7 +476,7 @@ pub mod tokenizer {
         #[test]
         fn braces_parses() {
             let tokens = assert_tokenizes_without_error("{{}}");
-            assert_token_list_matches(
+            assert_token_types_matches(
                 tokens,
                 vec![LeftBrace, LeftBrace, RightBrace, RightBrace, EOF],
             );
@@ -411,7 +485,7 @@ pub mod tokenizer {
         #[test]
         fn single_tokens_parses() {
             let tokens = assert_tokenizes_without_error("({*.,+*})");
-            assert_token_list_matches(
+            assert_token_types_matches(
                 tokens,
                 vec![
                     LeftParenthesis,
@@ -429,14 +503,21 @@ pub mod tokenizer {
         }
 
         #[test]
-        fn unexpected_tokens_error() {
-            assert_tokenizes_with_error("@,.$(#");
+        fn unexpected_token_errors() {
+            let (_, errors) = assert_tokenizes_with_error("@,.$(#");
+
+            let expected_error_0 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "@".to_string() };
+            let expected_error_1 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "$".to_string() };
+            let expected_error_2 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "#".to_string() };
+            assert!(errors.iter().nth(0).unwrap() == &expected_error_0);
+            assert!(errors.iter().nth(1).unwrap() == &expected_error_1);
+            assert!(errors.iter().nth(2).unwrap() == &expected_error_2);
         }
 
         #[test]
         fn assignment_and_equality_parses() {
             let tokens = assert_tokenizes_without_error("={===}");
-            assert_token_list_matches(
+            assert_token_types_matches(
                 tokens,
                 vec![Equal, LeftBrace, EqualEqual, Equal, RightBrace, EOF],
             );
@@ -445,25 +526,25 @@ pub mod tokenizer {
         #[test]
         fn negation_and_inequality_parses() {
             let tokens = assert_tokenizes_without_error("!!===");
-            assert_token_list_matches(tokens, vec![Bang, BangEqual, EqualEqual, EOF]);
+            assert_token_types_matches(tokens, vec![Bang, BangEqual, EqualEqual, EOF]);
         }
 
         #[test]
         fn relational_operations_parses() {
             let tokens = assert_tokenizes_without_error("<<=>>=");
-            assert_token_list_matches(tokens, vec![Less, LessEqual, Greater, GreaterEqual, EOF]);
+            assert_token_types_matches(tokens, vec![Less, LessEqual, Greater, GreaterEqual, EOF]);
         }
 
         #[test]
         fn comments_get_ignored_parses() {
             let tokens = assert_tokenizes_without_error("()// Comment");
-            assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
+            assert_token_types_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
         }
 
         #[test]
         fn comments_get_ignored_only_until_newline_parses() {
             let tokens = assert_tokenizes_without_error("()// Comment\n*(");
-            assert_token_list_matches(
+            assert_token_types_matches(
                 tokens,
                 vec![
                     LeftParenthesis,
@@ -478,13 +559,51 @@ pub mod tokenizer {
         #[test]
         fn whitespace_gets_ignored_parses() {
             let tokens = assert_tokenizes_without_error("(    \t ) \r *");
-            assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, Star, EOF]);
+            assert_token_types_matches(tokens, vec![LeftParenthesis, RightParenthesis, Star, EOF]);
         }
 
         #[test]
-        fn multi_line_errors_work() {
-            let tokens = assert_tokenizes_with_error("# ( \n)\t@");
-            assert_token_list_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
+        fn multi_line_with_unexpected_characters_errors() {
+            let (tokens, errors) = assert_tokenizes_with_error("# ( \n)\t@");
+            assert_token_types_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
+
+            let expected_error_0 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "#".to_string() };
+            let expected_error_1 = TokenizerParseError::UnexpectedCharacter { line: 2, character: "@".to_string() };
+            assert!(errors.iter().nth(0).unwrap() == &expected_error_0);
+            assert!(errors.iter().nth(1).unwrap() == &expected_error_1);
+        }
+
+        #[test]
+        fn simple_string_literal_parses() {
+            let tokens = assert_tokenizes_without_error("\"foo baz\"");
+            assert_token_list_matches(
+                tokens,
+                vec![
+                    create_literal_token!(StringLiteral, "foo baz".to_string()),
+                    create_token!(EOF),
+                ],
+            )
+        }
+
+        #[test]
+        fn multiple_string_literals_parses() {
+            let tokens = assert_tokenizes_without_error("\"foo\" \"baz\"");
+            assert_token_list_matches(
+                tokens,
+                vec![
+                    create_literal_token!(StringLiteral, "foo".to_string()),
+                    create_literal_token!(StringLiteral, "baz".to_string()),
+                    create_token!(EOF),
+                ],
+            )
+        }
+
+        #[test]
+        fn unterminated_string_errors() {
+            let (_, errors) = assert_tokenizes_with_error("\"foo");
+
+            let expected_error = TokenizerParseError::UnterminatedStringLiteral { line: 1 };
+            assert!(errors.iter().nth(0).unwrap() == &expected_error);
         }
     }
 }
