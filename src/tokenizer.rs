@@ -128,6 +128,7 @@ pub mod tokenizer {
                 // Non-default cases
                 TokenType::LeftParenthesis => write!(f, "LEFT_PAREN"),
                 TokenType::RightParenthesis => write!(f, "RIGHT_PAREN"),
+                TokenType::StringLiteral => write!(f, "STRING"),
                 _ => write!(f, "{}", format!("{:?}", self).to_case(Case::UpperSnake)),
             }
         }

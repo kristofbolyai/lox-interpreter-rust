@@ -34,7 +34,7 @@ fn main() {
             }
 
             for token in &tokenizer_result.tokens {
-                println!("{} {} null", token.token_type, token.lexem)
+                println!("{} {} {}", token.token_type, token.lexem, token.literal.as_ref().unwrap_or(&String::new()))
             }
 
             // Exit with error ode 65 if any errors are present
