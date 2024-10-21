@@ -34,7 +34,7 @@ fn main() {
             }
 
             for token in &tokenizer_result.tokens {
-                println!("{} {} {}", token.token_type, token.token_type.token_lexeme(&token.literal), token.literal.to_string())
+                println!("{}", token)
             }
 
             // Exit with error ode 65 if any errors are present

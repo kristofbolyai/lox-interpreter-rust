@@ -3,6 +3,8 @@ pub mod tokenizer {
     use std::fmt::{Debug, Display, Formatter};
     use std::iter::Peekable;
     use std::str::Chars;
+    use once_cell::sync::Lazy;
+    use regex::Regex;
     use strum::IntoEnumIterator;
     use strum_macros::EnumIter;
 
@@ -19,7 +21,7 @@ pub mod tokenizer {
         ($literal:expr) => {
             Token {
                 token_type: TokenType::StringLiteral,
-                literal: TokenLiteral::StringLiteral { string: $literal },
+                literal: TokenLiteral::StringLiteral { string_lexeme: $literal },
             }
         };
     }
@@ -28,7 +30,7 @@ pub mod tokenizer {
         ($literal:expr) => {
             Token {
                 token_type: TokenType::NumberLiteral,
-                literal: TokenLiteral::NumberLiteral { number: $literal },
+                literal: TokenLiteral::NumberLiteral { number_lexeme: $literal.to_string() },
             }
         };
     }
@@ -76,7 +78,7 @@ pub mod tokenizer {
     }
 
     impl TokenType {
-        pub fn token_lexeme(&self, literal: &TokenLiteral) -> String {
+        pub fn token_lexeme(&self) -> String {
             match &self {
                 TokenType::LeftParenthesis => "(".to_string(),
                 TokenType::RightParenthesis => ")".to_string(),
@@ -97,9 +99,8 @@ pub mod tokenizer {
                 TokenType::GreaterEqual => ">=".to_string(),
                 TokenType::Less => "<".to_string(),
                 TokenType::LessEqual => "<=".to_string(),
-                // & is later replaced with the literal's value
-                TokenType::StringLiteral => format!("\"{}\"", literal),
-                TokenType::NumberLiteral => format!("{}", literal),
+                TokenType::StringLiteral => panic!("Literal types should not call TokenType#token_lexeme."),
+                TokenType::NumberLiteral => panic!("Literal types should not call TokenType#token_lexeme."),
                 TokenType::EOF => "".to_string(),
             }
         }
@@ -139,6 +140,7 @@ pub mod tokenizer {
                 TokenType::LeftParenthesis => write!(f, "LEFT_PAREN"),
                 TokenType::RightParenthesis => write!(f, "RIGHT_PAREN"),
                 TokenType::StringLiteral => write!(f, "STRING"),
+                TokenType::NumberLiteral => write!(f, "NUMBER"),
                 _ => write!(f, "{}", format!("{:?}", self).to_case(Case::UpperSnake)),
             }
         }
@@ -147,16 +149,34 @@ pub mod tokenizer {
     #[derive(Debug, PartialEq)]
     pub enum TokenLiteral {
         Empty,
-        StringLiteral { string: String },
-        NumberLiteral { number: f64 },
+        StringLiteral { string_lexeme: String },
+        NumberLiteral { number_lexeme: String },
+    }
+
+    impl TokenLiteral {
+        fn lexeme(&self) -> String {
+            match &self {
+                TokenLiteral::Empty => "".to_string(),
+                TokenLiteral::StringLiteral { string_lexeme } => string_lexeme.to_string(),
+                TokenLiteral::NumberLiteral { number_lexeme } => number_lexeme.to_string()
+            }
+        }
     }
 
     impl Display for TokenLiteral {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            static NUMBER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.(0+[1-9]+|0)0+$").unwrap());
+
             match &self {
                 TokenLiteral::Empty => write!(f, "null"),
-                TokenLiteral::StringLiteral { string } => write!(f, "{}", string),
-                TokenLiteral::NumberLiteral { number } => write!(f, "{}", number),
+                TokenLiteral::StringLiteral { string_lexeme } => write!(f, "{}", string_lexeme.replace("\"", "")),
+                TokenLiteral::NumberLiteral { number_lexeme } => {
+                    if number_lexeme.contains(".") {
+                        write!(f, "{}", NUMBER_RE.replace(number_lexeme, ".$1"))
+                    } else {
+                        write!(f, "{}.0", number_lexeme)
+                    }
+                },
             }
         }
     }
@@ -165,6 +185,16 @@ pub mod tokenizer {
     pub struct Token {
         pub token_type: TokenType,
         pub literal: TokenLiteral,
+    }
+
+    impl Display for Token {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            if &self.token_type.token_length() == &TokenLength::Literal {
+                write!(f, "{} {} {}", &self.token_type, &self.literal.lexeme(), &self.literal)
+            } else {
+                write!(f, "{} {} {}", &self.token_type, &self.token_type.token_lexeme(), &self.literal)
+            }
+        }
     }
 
     #[derive(Eq, PartialEq)]
@@ -316,8 +346,7 @@ pub mod tokenizer {
             }
 
             if !number_string.is_empty() {
-                let literal: f64 = number_string.parse::<f64>().unwrap();
-                Some(create_number_token!(literal))
+                Some(create_number_token!(number_string))
             } else {
                 None
             }
@@ -343,13 +372,14 @@ pub mod tokenizer {
             char_iter.next();
 
             let mut literal_terminated = false;
-            let mut literal = String::new();
+            let mut literal_lexeme = String::new();
+            literal_lexeme.push('"');
 
             while let Some(next_char) = char_iter.next() {
                 match next_char {
                     '\n' => return Err(TokenizerParseError::UnterminatedStringLiteral { line }),
                     '"' => literal_terminated = true,
-                    _ => literal.push(next_char),
+                    _ => literal_lexeme.push(next_char),
                 }
 
                 if literal_terminated {
@@ -357,10 +387,12 @@ pub mod tokenizer {
                 }
             }
 
+            literal_lexeme.push('"');
+
             if !literal_terminated {
                 Err(TokenizerParseError::UnterminatedStringLiteral { line })
             } else {
-                Ok(Some(create_string_token!(literal)))
+                Ok(Some(create_string_token!(literal_lexeme)))
             }
         }
 
@@ -376,7 +408,7 @@ pub mod tokenizer {
             let token_types_matching_first_char: Vec<TokenType> = TokenType::iter()
                 .filter(|token_type| token_type.token_length() == TokenLength::SingleOrDouble)
                 .filter(|token_type| {
-                    let token_lexeme = token_type.token_lexeme(&TokenLiteral::Empty);
+                    let token_lexeme = token_type.token_lexeme();
                     let mut token_type_chars = token_lexeme.chars();
                     if let Some(first_token_char) = token_type_chars.next() {
                         return first_token_char.eq(maybe_first_char.unwrap());
@@ -397,7 +429,7 @@ pub mod tokenizer {
             let token_types_matching_full_lexem: Vec<&TokenType> = token_types_matching_first_char
                 .iter()
                 .filter(|token_type| {
-                    let token_lexeme = token_type.token_lexeme(&TokenLiteral::Empty);
+                    let token_lexeme = token_type.token_lexeme();
                     let mut token_type_chars = token_lexeme.chars();
                     // We've already checked the first char
                     token_type_chars.next();
@@ -426,7 +458,7 @@ pub mod tokenizer {
             if token_types_matching_full_lexem.len() > 1 {
                 let maybe_token_type = token_types_matching_full_lexem
                     .iter()
-                    .filter(|token_type| token_type.token_lexeme(&TokenLiteral::Empty).len() == 2)
+                    .filter(|token_type| token_type.token_lexeme().len() == 2)
                     .next();
 
                 if maybe_token_type == None {
@@ -443,7 +475,7 @@ pub mod tokenizer {
             }
 
             // Check if we used two chars for the lexem, if so, move the char iterator
-            if token_type.token_lexeme(&TokenLiteral::Empty).len() == 2 {
+            if token_type.token_lexeme().len() == 2 {
                 char_iter.next();
             }
 
@@ -456,7 +488,7 @@ pub mod tokenizer {
                     .filter(|token_type| token_type.token_length() == TokenLength::Single)
                     .filter(|token_type| {
                         if let Some(single_char_token) =
-                            token_type.token_lexeme(&TokenLiteral::Empty).chars().next()
+                            token_type.token_lexeme().chars().next()
                         {
                             return single_char_token.eq(char);
                         }
@@ -689,8 +721,8 @@ pub mod tokenizer {
             assert_token_list_matches(
                 tokens,
                 vec![
-                    create_number_token!(42f64),
-                    create_number_token!(124f64),
+                    create_number_token!("42"),
+                    create_number_token!("124"),
                     create_token!(EOF),
                 ],
             )
@@ -698,14 +730,14 @@ pub mod tokenizer {
 
         #[test]
         fn float_numbers_parses() {
-            let tokens = assert_tokenizes_without_error("42.124 56 123.1 1");
+            let tokens = assert_tokenizes_without_error("42.124 56 75.0000 1");
             assert_token_list_matches(
                 tokens,
                 vec![
-                    create_number_token!(42.124f64),
-                    create_number_token!(56f64),
-                    create_number_token!(123.1f64),
-                    create_number_token!(1f64),
+                    create_number_token!("42.124"),
+                    create_number_token!("56"),
+                    create_number_token!("75.0000"),
+                    create_number_token!("1"),
                     create_token!(EOF),
                 ],
             )
