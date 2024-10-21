@@ -1,6 +1,6 @@
 pub mod tokenizer {
     use convert_case::{Case, Casing};
-    use std::fmt::{Display, Formatter};
+    use std::fmt::{Debug, Display, Formatter};
     use std::iter::Peekable;
     use std::str::Chars;
     use strum::IntoEnumIterator;
@@ -10,18 +10,25 @@ pub mod tokenizer {
         ($token_type:expr) => {
             Token {
                 token_type: $token_type,
-                lexem: $token_type.token_lexem().to_string(),
-                literal: None,
+                literal: TokenLiteral::Empty,
             }
         };
     }
 
-    macro_rules! create_literal_token {
-        ($token_type:expr, $literal:expr) => {
+    macro_rules! create_string_token {
+        ($literal:expr) => {
             Token {
-                token_type: $token_type,
-                lexem: $token_type.token_lexem().to_string().replace("&", &*$literal),
-                literal: Some($literal),
+                token_type: TokenType::StringLiteral,
+                literal: TokenLiteral::StringLiteral { string: $literal },
+            }
+        };
+    }
+
+    macro_rules! create_number_token {
+        ($literal:expr) => {
+            Token {
+                token_type: TokenType::NumberLiteral,
+                literal: TokenLiteral::NumberLiteral { number: $literal },
             }
         };
     }
@@ -62,12 +69,41 @@ pub mod tokenizer {
 
         // Literals
         StringLiteral,
+        NumberLiteral,
 
         // Special
         EOF,
     }
 
     impl TokenType {
+        pub fn token_lexeme(&self, literal: &TokenLiteral) -> String {
+            match &self {
+                TokenType::LeftParenthesis => "(".to_string(),
+                TokenType::RightParenthesis => ")".to_string(),
+                TokenType::LeftBrace => "{".to_string(),
+                TokenType::RightBrace => "}".to_string(),
+                TokenType::Comma => ",".to_string(),
+                TokenType::Dot => ".".to_string(),
+                TokenType::Minus => "-".to_string(),
+                TokenType::Plus => "+".to_string(),
+                TokenType::Semicolon => ";".to_string(),
+                TokenType::Slash => "/".to_string(),
+                TokenType::Star => "*".to_string(),
+                TokenType::Bang => "!".to_string(),
+                TokenType::BangEqual => "!=".to_string(),
+                TokenType::Equal => "=".to_string(),
+                TokenType::EqualEqual => "==".to_string(),
+                TokenType::Greater => ">".to_string(),
+                TokenType::GreaterEqual => ">=".to_string(),
+                TokenType::Less => "<".to_string(),
+                TokenType::LessEqual => "<=".to_string(),
+                // & is later replaced with the literal's value
+                TokenType::StringLiteral => format!("\"{}\"", literal),
+                TokenType::NumberLiteral => format!("{}", literal),
+                TokenType::EOF => "".to_string(),
+            }
+        }
+
         fn token_length(&self) -> TokenLength {
             match &self {
                 TokenType::LeftParenthesis => TokenLength::Single,
@@ -90,34 +126,8 @@ pub mod tokenizer {
                 TokenType::Less => TokenLength::SingleOrDouble,
                 TokenType::LessEqual => TokenLength::SingleOrDouble,
                 TokenType::StringLiteral => TokenLength::Literal,
+                TokenType::NumberLiteral => TokenLength::Literal,
                 TokenType::EOF => TokenLength::EOF,
-            }
-        }
-
-        fn token_lexem(&self) -> &str {
-            match &self {
-                TokenType::LeftParenthesis => "(",
-                TokenType::RightParenthesis => ")",
-                TokenType::LeftBrace => "{",
-                TokenType::RightBrace => "}",
-                TokenType::Comma => ",",
-                TokenType::Dot => ".",
-                TokenType::Minus => "-",
-                TokenType::Plus => "+",
-                TokenType::Semicolon => ";",
-                TokenType::Slash => "/",
-                TokenType::Star => "*",
-                TokenType::Bang => "!",
-                TokenType::BangEqual => "!=",
-                TokenType::Equal => "=",
-                TokenType::EqualEqual => "==",
-                TokenType::Greater => ">",
-                TokenType::GreaterEqual => ">=",
-                TokenType::Less => "<",
-                TokenType::LessEqual => "<=",
-                // & is later replaced with the literal's value
-                TokenType::StringLiteral => "\"&\"",
-                TokenType::EOF => "",
             }
         }
     }
@@ -134,11 +144,27 @@ pub mod tokenizer {
         }
     }
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, PartialEq)]
+    pub enum TokenLiteral {
+        Empty,
+        StringLiteral { string: String },
+        NumberLiteral { number: f64 },
+    }
+
+    impl Display for TokenLiteral {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            match &self {
+                TokenLiteral::Empty => write!(f, "null"),
+                TokenLiteral::StringLiteral { string } => write!(f, "{}", string),
+                TokenLiteral::NumberLiteral { number } => write!(f, "{}", number),
+            }
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
     pub struct Token {
         pub token_type: TokenType,
-        pub lexem: String,
-        pub literal: Option<String>,
+        pub literal: TokenLiteral,
     }
 
     #[derive(Eq, PartialEq)]
@@ -199,7 +225,10 @@ pub mod tokenizer {
                     errors.push(error);
                 }
 
-                if let Some(token) = Self::try_parse_single_or_double_character_token(&mut char_iter)
+                if let Some(token) = Self::try_parse_number_literals(&mut char_iter) {
+                    tokens.push(token)
+                } else if let Some(token) =
+                    Self::try_parse_single_or_double_character_token(&mut char_iter)
                 {
                     tokens.push(token);
                 } else if let Some(token) = Self::try_parse_single_character_token(&mut char_iter) {
@@ -269,7 +298,35 @@ pub mod tokenizer {
             }
         }
 
-        fn try_parse_string_literals(char_iter: &mut Peekable<Chars>, line: u64) -> Result<Option<Token>, TokenizerParseError> {
+        fn try_parse_number_literals(char_iter: &mut Peekable<Chars>) -> Option<Token> {
+            let mut number_string = String::new();
+
+            loop {
+                let next_char = char_iter.peek();
+                if let None = next_char {
+                    break;
+                }
+
+                if next_char?.is_numeric() || (!number_string.is_empty() && next_char? == &'.') {
+                    number_string.push(char_iter.next().unwrap());
+                    continue;
+                }
+
+                break;
+            }
+
+            if !number_string.is_empty() {
+                let literal: f64 = number_string.parse::<f64>().unwrap();
+                Some(create_number_token!(literal))
+            } else {
+                None
+            }
+        }
+
+        fn try_parse_string_literals(
+            char_iter: &mut Peekable<Chars>,
+            line: u64,
+        ) -> Result<Option<Token>, TokenizerParseError> {
             let maybe_first_char = char_iter.peek();
 
             if maybe_first_char == None {
@@ -290,9 +347,9 @@ pub mod tokenizer {
 
             while let Some(next_char) = char_iter.next() {
                 match next_char {
-                    '\n' => return Err(TokenizerParseError::UnterminatedStringLiteral {line}),
+                    '\n' => return Err(TokenizerParseError::UnterminatedStringLiteral { line }),
                     '"' => literal_terminated = true,
-                    _ => literal.push(next_char)
+                    _ => literal.push(next_char),
                 }
 
                 if literal_terminated {
@@ -301,9 +358,9 @@ pub mod tokenizer {
             }
 
             if !literal_terminated {
-                Err(TokenizerParseError::UnterminatedStringLiteral {line})
+                Err(TokenizerParseError::UnterminatedStringLiteral { line })
             } else {
-                Ok(Some(create_literal_token!(TokenType::StringLiteral, literal)))
+                Ok(Some(create_string_token!(literal)))
             }
         }
 
@@ -319,7 +376,8 @@ pub mod tokenizer {
             let token_types_matching_first_char: Vec<TokenType> = TokenType::iter()
                 .filter(|token_type| token_type.token_length() == TokenLength::SingleOrDouble)
                 .filter(|token_type| {
-                    let mut token_type_chars = token_type.token_lexem().chars();
+                    let token_lexeme = token_type.token_lexeme(&TokenLiteral::Empty);
+                    let mut token_type_chars = token_lexeme.chars();
                     if let Some(first_token_char) = token_type_chars.next() {
                         return first_token_char.eq(maybe_first_char.unwrap());
                     }
@@ -339,7 +397,8 @@ pub mod tokenizer {
             let token_types_matching_full_lexem: Vec<&TokenType> = token_types_matching_first_char
                 .iter()
                 .filter(|token_type| {
-                    let mut token_type_chars = token_type.token_lexem().chars();
+                    let token_lexeme = token_type.token_lexeme(&TokenLiteral::Empty);
+                    let mut token_type_chars = token_lexeme.chars();
                     // We've already checked the first char
                     token_type_chars.next();
 
@@ -367,7 +426,7 @@ pub mod tokenizer {
             if token_types_matching_full_lexem.len() > 1 {
                 let maybe_token_type = token_types_matching_full_lexem
                     .iter()
-                    .filter(|token_type| token_type.token_lexem().len() == 2)
+                    .filter(|token_type| token_type.token_lexeme(&TokenLiteral::Empty).len() == 2)
                     .next();
 
                 if maybe_token_type == None {
@@ -384,7 +443,7 @@ pub mod tokenizer {
             }
 
             // Check if we used two chars for the lexem, if so, move the char iterator
-            if token_type.token_lexem().len() == 2 {
+            if token_type.token_lexeme(&TokenLiteral::Empty).len() == 2 {
                 char_iter.next();
             }
 
@@ -396,7 +455,9 @@ pub mod tokenizer {
                 let maybe_token_type = TokenType::iter()
                     .filter(|token_type| token_type.token_length() == TokenLength::Single)
                     .filter(|token_type| {
-                        if let Some(single_char_token) = token_type.token_lexem().chars().next() {
+                        if let Some(single_char_token) =
+                            token_type.token_lexeme(&TokenLiteral::Empty).chars().next()
+                        {
                             return single_char_token.eq(char);
                         }
 
@@ -422,6 +483,7 @@ pub mod tokenizer {
         use super::*;
         use crate::tokenizer::tokenizer::TokenType::*;
         use pretty_assertions::{assert_eq, assert_ne};
+        use std::f32::consts::E;
         use std::ptr::null;
 
         fn assert_tokenizes_without_error(s: &str) -> Vec<Token> {
@@ -446,9 +508,8 @@ pub mod tokenizer {
             let expected_tokens: Vec<Token> = expected
                 .into_iter()
                 .map(|token_type| Token {
-                    lexem: token_type.token_lexem().to_string(),
                     token_type,
-                    literal: None,
+                    literal: TokenLiteral::Empty,
                 })
                 .collect();
 
@@ -507,9 +568,18 @@ pub mod tokenizer {
         fn unexpected_token_errors() {
             let (_, errors) = assert_tokenizes_with_error("@,.$(#");
 
-            let expected_error_0 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "@".to_string() };
-            let expected_error_1 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "$".to_string() };
-            let expected_error_2 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "#".to_string() };
+            let expected_error_0 = TokenizerParseError::UnexpectedCharacter {
+                line: 1,
+                character: "@".to_string(),
+            };
+            let expected_error_1 = TokenizerParseError::UnexpectedCharacter {
+                line: 1,
+                character: "$".to_string(),
+            };
+            let expected_error_2 = TokenizerParseError::UnexpectedCharacter {
+                line: 1,
+                character: "#".to_string(),
+            };
             assert!(errors.iter().nth(0).unwrap() == &expected_error_0);
             assert!(errors.iter().nth(1).unwrap() == &expected_error_1);
             assert!(errors.iter().nth(2).unwrap() == &expected_error_2);
@@ -568,8 +638,14 @@ pub mod tokenizer {
             let (tokens, errors) = assert_tokenizes_with_error("# ( \n)\t@");
             assert_token_types_matches(tokens, vec![LeftParenthesis, RightParenthesis, EOF]);
 
-            let expected_error_0 = TokenizerParseError::UnexpectedCharacter { line: 1, character: "#".to_string() };
-            let expected_error_1 = TokenizerParseError::UnexpectedCharacter { line: 2, character: "@".to_string() };
+            let expected_error_0 = TokenizerParseError::UnexpectedCharacter {
+                line: 1,
+                character: "#".to_string(),
+            };
+            let expected_error_1 = TokenizerParseError::UnexpectedCharacter {
+                line: 2,
+                character: "@".to_string(),
+            };
             assert!(errors.iter().nth(0).unwrap() == &expected_error_0);
             assert!(errors.iter().nth(1).unwrap() == &expected_error_1);
         }
@@ -580,7 +656,7 @@ pub mod tokenizer {
             assert_token_list_matches(
                 tokens,
                 vec![
-                    create_literal_token!(StringLiteral, "foo baz".to_string()),
+                    create_string_token!("foo baz".to_string()),
                     create_token!(EOF),
                 ],
             )
@@ -592,8 +668,8 @@ pub mod tokenizer {
             assert_token_list_matches(
                 tokens,
                 vec![
-                    create_literal_token!(StringLiteral, "foo".to_string()),
-                    create_literal_token!(StringLiteral, "baz".to_string()),
+                    create_string_token!("foo".to_string()),
+                    create_string_token!("baz".to_string()),
                     create_token!(EOF),
                 ],
             )
@@ -605,6 +681,34 @@ pub mod tokenizer {
 
             let expected_error = TokenizerParseError::UnterminatedStringLiteral { line: 1 };
             assert!(errors.iter().nth(0).unwrap() == &expected_error);
+        }
+
+        #[test]
+        fn decimal_numbers_parses() {
+            let tokens = assert_tokenizes_without_error("42 124");
+            assert_token_list_matches(
+                tokens,
+                vec![
+                    create_number_token!(42f64),
+                    create_number_token!(124f64),
+                    create_token!(EOF),
+                ],
+            )
+        }
+
+        #[test]
+        fn float_numbers_parses() {
+            let tokens = assert_tokenizes_without_error("42.124 56 123.1 1");
+            assert_token_list_matches(
+                tokens,
+                vec![
+                    create_number_token!(42.124f64),
+                    create_number_token!(56f64),
+                    create_number_token!(123.1f64),
+                    create_number_token!(1f64),
+                    create_token!(EOF),
+                ],
+            )
         }
     }
 }
